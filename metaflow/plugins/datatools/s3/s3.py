@@ -1104,6 +1104,24 @@ class S3(object):
         else:
             return self.get_recursive([None], return_info)
 
+    def get_dir(
+        self, local_root: str, prefix: Optional[str] = None, return_info: bool = False
+    ) -> List[str]:
+        if self._s3root is None:
+            raise MetaflowS3URLException(
+                "Can't get_dir() when S3 is initialized without a prefix"
+            )
+
+        objs = self.get_recursive([prefix], return_info)
+        local_paths = []
+        for obj in objs:
+            local_path = os.path.join(local_root, obj.key)
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            os.rename(obj.path, local_path)
+            local_paths.append(local_path)
+
+        return local_paths
+
     def put(
         self,
         key: Union[str, S3PutObject],
@@ -1322,6 +1340,23 @@ class S3(object):
                 yield path, self._url(key), store_info
 
         return self._put_many_files(_check(), overwrite)
+
+    def put_dir(self, prefix, local_root):
+        if self._s3root is None:
+            raise MetaflowS3URLException(
+                "Can't put_dir() when S3 is initialized without a prefix"
+            )
+
+        s3_dest = os.path.join(self._s3root, prefix) if prefix else self._s3root
+        root = os.path.abspath(local_root)
+        objs = []
+        for dir_path, _, files in os.walk(root):
+            for file in files:
+                path = os.path.join(dir_path, file)
+                key = os.path.relpath(path, start=root)
+                objs.append((os.path.join(s3_dest, key), path))
+        with S3() as s3:
+            s3.put_files(objs)
 
     def _one_boto_op(self, op, url, create_tmp_file=True):
         error = ""
